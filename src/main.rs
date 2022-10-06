@@ -4,46 +4,68 @@ mod math;
 mod geo;
 mod random;
 
+use std::rc::Rc;
+
 use minifb::{Key, Window, WindowOptions };
 use math::{float3, ray};
-use geo::{sphere, ray_hit, scene};
-use random::*;
+use geo::{Sphere, RayHit, RayPayload, Scene, LambertianMaterial, MetallicMaterial, DielectricMaterial };
 
 const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
 
-fn ray_color(r: ray, w: &scene, depth: u32) -> float3 {
+pub struct Camera
+{
+    pub viewport_height: f32,
+    pub viewport_width: f32,
+    pub focal_length: f32,
+    pub origin: float3,
+}
+
+fn ray_color(r: ray, payload: &mut RayPayload, w: &Scene, depth: u32) {
     if depth <= 0 {
-        return float3 { x: 0.0, y: 0.0, z: 0.0 }
+        payload.attenuation = float3 { x: 0.0, y: 0.0, z: 0.0 };
+        return;
     };
 
-    let mut hit: ray_hit = ray_hit { 
+    let mut hit: RayHit = RayHit { 
         t: 0.0, 
         point: float3{ x: 0.0, y: 0.0, z: 0.0 },
         normal: float3 {x: 0.0, y: 0.0, z: 0.0},
+        object: None,
+        front: false,
     };
 
     let max_distance: f32 = 100000.0;
 
     if w.hit(r, max_distance, &mut hit) {
-        let target = hit.point + hit.normal + random_point_in_unit_hemisphere(hit.normal);
+        let hit_object = hit.object.as_ref().unwrap();
+        let material = &hit_object.material;
 
-        let child_ray = ray {
-            origin: hit.point, 
-            direction: target - hit.point
+        let mut scattered_ray = ray {
+            origin: float3 { x: 0.0, y: 0.0, z: 0.0 },
+            direction: float3 { x: 0.0, y: 0.0, z: 0.0 }
         };
 
-        return 0.5 * ray_color(child_ray, w, depth - 1);
-
-        // return 0.5 * (hit.normal + float3 { x: 1.0, y: 1.0, z: 1.0 });
+        if material.scatter(r, &hit, payload, &mut scattered_ray)
+        {
+            ray_color(scattered_ray, payload, w, depth - 1);
+            return;
+        }
+        else
+        {
+            payload.attenuation = float3 { x: 0.0, y: 0.0, z: 0.0 };
+            return;
+        }
     }
+    else
+    {
+        let c1 = float3 { x: 1.0, y: 1.0, z: 1.0 };
+        let c2 = float3 { x: 0.5, y: 0.7, z: 1.0 };
 
-    let c1 = float3 { x: 1.0, y: 1.0, z: 1.0 };
-    let c2 = float3 { x: 0.5, y: 0.7, z: 1.0 };
-
-    let unit_direction = r.direction.normalize();
-    let t = 0.5 * (unit_direction.y + 1.0);
-    return (1.0 - t) * c1 + t * c2;
+        let unit_direction = r.direction.normalize();
+        let t = 0.5 * (unit_direction.y + 1.0);
+        payload.attenuation = payload.attenuation * ((1.0 - t) * c1 + t * c2);
+    }
 }
 
 fn color_to_u32(c: float3) -> u32 {
@@ -55,6 +77,8 @@ fn color_to_u32(c: float3) -> u32 {
 }
 
 fn main() {
+    let max_bounces: u32 = 50;
+
     let mut screen_buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut accum_buffer: Vec<float3> = vec![float3 { x: 0.0, y: 0.0, z: 0.0 }; WIDTH * HEIGHT];
     let mut accum_count: u32 = 0;
@@ -69,59 +93,93 @@ fn main() {
     });
 
     let aspect: f32 = (WIDTH as f32) / (HEIGHT as f32);
-    let viewport_height: f32 = 2.0;
-    let viewport_width: f32 = aspect * viewport_height;
-    let focalLength: f32 = 1.0;
-    let max_bounces: u32 = 5;
-    let samples_per_pixel: u32 = 10;
-
-    let origin: float3 = float3 { x: 0.0, y: 0.0, z: 0.0 };
-
-    let corner = float3 {
-        x: origin.x - viewport_width * 0.5,
-        y: origin.y - viewport_height * 0.5,
-        z: origin.z - focalLength
+    let camera: Camera = Camera {
+        viewport_height: 2.0,
+        viewport_width: aspect * 2.0,
+        origin: float3 { x: 0.0, y: 0.0, z: 0.0 },
+        focal_length: 1.0,
     };
 
-    let world: scene = scene {
+    let world: Scene = Scene {
         objects: vec![
-            sphere {
-                center: float3 { x: 0.0, y: 0.0, z: -1.0 },
-                radius: 0.5
-            },
-            sphere {
+            Rc::new(Sphere { // ground
                 center: float3 { x: 0.0, y: -100.5, z: -1.0 },
-                radius: 100.0
-            },
-        ]
-    };        
+                radius: 100.0,
+                material: Box::new(LambertianMaterial {
+                    albedo: float3 { x: 0.8, y: 0.8, z: 0.0 },
+                    roughness: 0.0,
+                })
+            }),
 
+            Rc::new(Sphere { // center
+                center: float3 { x: 0.0, y: 0.0, z: -1.0 },
+                radius: 0.5,
+                material: Box::new(LambertianMaterial {
+                    albedo: float3 { x: 1.0, y: 0.0, z: 0.0 },
+                    roughness: 0.0,
+                })
+            }),
+
+            Rc::new(Sphere { // left
+                center: float3 { x: -1.0, y: 0.0, z: -1.0 },
+                radius: 0.5,
+                material: Box::new(DielectricMaterial { 
+                    refraction_index: 1.5
+                })                
+            }),
+
+            Rc::new(Sphere { // left
+                center: float3 { x: -1.0, y: 0.0, z: -1.0 },
+                radius: -0.4,
+                material: Box::new(DielectricMaterial { 
+                    refraction_index: 1.5
+                })                
+            }),
+
+            Rc::new(Sphere {
+                center: float3 { x: 1.0, y: 0.0, z: -1.0 },
+                radius: 0.5,
+                material: Box::new(MetallicMaterial {
+                    albedo: float3 { x: 1.0, y: 1.0, z: 1.0 },
+                    roughness: 0.2,
+                })
+            }),
+        ]
+    };   
+    
+    let corner = float3 {
+        x: camera.origin.x - camera.viewport_width * 0.5,
+        y: camera.origin.y - camera.viewport_height * 0.5,
+        z: camera.origin.z - camera.focal_length
+    };
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         for j in 0..HEIGHT {
             for i in 0..WIDTH {
                 let mut color: float3 = float3 { x: 0.0, y: 0.0, z: 0.0 };
 
-                //for _ in 0..samples_per_pixel {
-                    let u = ((i as f32) + random::random_f32()) / ((WIDTH-1) as f32);
-                    let v = 1.0 - ((j as f32) + random::random_f32()) / ((HEIGHT-1) as f32);
+                // add some random variance to dispatched rays
+                let u = ((i as f32) + random::random_f32()) / ((WIDTH-1) as f32);
+                let v = 1.0 - ((j as f32) + random::random_f32()) / ((HEIGHT-1) as f32);
 
-                    let r = ray {
-                        origin: origin,
-                        direction: float3 {
-                            x: corner.x + u * viewport_width - origin.x,
-                            y: corner.y + v * viewport_height - origin.y,
-                            z: corner.z - origin.z
-                        }
-                    };
+                let r = ray {
+                    origin: camera.origin,
+                    direction: float3 {
+                        x: corner.x + u * camera.viewport_width - camera.origin.x,
+                        y: corner.y + v * camera.viewport_height - camera.origin.y,
+                        z: corner.z - camera.origin.z
+                    }
+                };
 
-                    color = color + ray_color(r, &world, max_bounces);
-                //}           
+                let mut payload: RayPayload = RayPayload {
+                    attenuation: float3 { x: 1.0, y: 1.0, z: 1.0 }
+                };
+
+                ray_color(r, &mut payload, &world, max_bounces);
+
+                color = color + payload.attenuation;
     
                 let prev_color: float3 = accum_buffer[j * WIDTH + i];
-                // let frame_color: u32 = color_to_u32(color * (1.0 / (samples_per_pixel as f32)));
-                // let frame_color: float3 = color as f64;
-
                 accum_buffer[j * WIDTH + i] = prev_color + color;
             }
         }

@@ -1,6 +1,7 @@
 use std::ops;
 
 #[derive(Debug, Copy, Clone)]
+#[allow(non_camel_case_types)]
 pub struct float3 {
     pub x: f32,
     pub y: f32,
@@ -9,6 +10,7 @@ pub struct float3 {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[allow(non_camel_case_types)]
 pub struct ray {
     pub origin: float3,
     pub direction: float3,
@@ -35,6 +37,10 @@ impl float3 {
     pub fn dot(a: float3, b: float3) -> f32 {
         return a.x * b.x + a.y * b.y + a.z * b.z;
     }
+
+    pub fn reflect(v: float3, n: float3) -> float3 {
+        return v - 2.0 * float3::dot(v, n) * n;
+    }
 }
 
 impl ops::Mul<float3> for f32 {
@@ -57,6 +63,18 @@ impl ops::Mul<f32> for float3 {
             x: self.x * _rhs,
             y: self.y * _rhs,
             z: self.z * _rhs,
+        }
+    }
+}
+
+impl ops::Mul<float3> for float3 {
+    type Output = float3;
+
+    fn mul(self, rhs: float3) -> float3 {
+        float3 {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+            z: self.z * rhs.z,
         }
     }
 }
