@@ -38,6 +38,14 @@ impl float3 {
         return a.x * b.x + a.y * b.y + a.z * b.z;
     }
 
+    pub fn cross(u: float3, v: float3) -> float3 {
+        float3 {
+            x: u.y * v.z - u.z * v.y,
+            y: u.z * v.x - u.x * v.z,
+            z: u.x * v.y - u.y * v.x
+        }
+    }
+
     pub fn reflect(v: float3, n: float3) -> float3 {
         return v - 2.0 * float3::dot(v, n) * n;
     }

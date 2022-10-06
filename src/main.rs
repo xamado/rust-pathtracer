@@ -19,6 +19,41 @@ pub struct Camera
     pub viewport_width: f32,
     pub focal_length: f32,
     pub origin: float3,
+    pub forward: float3,
+    pub right: float3,
+    pub up: float3,
+
+    pub horizontal: float3,
+    pub vertical: float3,
+    pub corner: float3,
+}
+
+fn create_camera(eye: float3, lookat: float3, up: float3, vfov: f32, aspect: f32) -> Camera
+{
+    let theta = f32::to_radians(vfov);
+    let h = f32::tan(theta * 0.5);
+    let viewport_height = 2.0 * h;
+    let viewport_width = aspect * viewport_height;
+
+    let f = (eye - lookat).normalize();
+    let r = float3::cross(up, f);
+    let u = float3::cross(f, r);
+
+    let horizontal = viewport_width * r;
+    let vertical = viewport_height * u;
+
+    Camera {
+        origin: eye,
+        forward: f,
+        right: r,
+        up: u,
+        viewport_width,
+        viewport_height,
+        focal_length: 1.0,
+        horizontal: viewport_width * r,
+        vertical: viewport_height * u,
+        corner: eye - horizontal * 0.5 - vertical * 0.5 - f,
+    }
 }
 
 fn ray_color(r: ray, payload: &mut RayPayload, w: &Scene, depth: u32) {
@@ -77,7 +112,7 @@ fn color_to_u32(c: float3) -> u32 {
 }
 
 fn main() {
-    let max_bounces: u32 = 50;
+    let max_bounces: u32 = 15;
 
     let mut screen_buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut accum_buffer: Vec<float3> = vec![float3 { x: 0.0, y: 0.0, z: 0.0 }; WIDTH * HEIGHT];
@@ -93,12 +128,13 @@ fn main() {
     });
 
     let aspect: f32 = (WIDTH as f32) / (HEIGHT as f32);
-    let camera: Camera = Camera {
-        viewport_height: 2.0,
-        viewport_width: aspect * 2.0,
-        origin: float3 { x: 0.0, y: 0.0, z: 0.0 },
-        focal_length: 1.0,
-    };
+    let mut camera = create_camera(
+        float3 { x: -2.0, y: 2.0, z: 1.0 }, 
+        float3 { x: 0.0, y: 0.0, z: -1.0 }, 
+        float3 { x: 0.0, y: 1.0, z: 0.0 },
+        90.0,
+        aspect
+    );
 
     let world: Scene = Scene {
         objects: vec![
@@ -145,15 +181,22 @@ fn main() {
                 })
             }),
         ]
-    };   
-    
-    let corner = float3 {
-        x: camera.origin.x - camera.viewport_width * 0.5,
-        y: camera.origin.y - camera.viewport_height * 0.5,
-        z: camera.origin.z - camera.focal_length
     };
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // process input
+        if window.is_key_down(Key::S) {
+            camera.origin = camera.origin - camera.forward * 0.3;
+
+            // reset accum buffer
+            for j in 0..HEIGHT {
+                for i in 0..WIDTH {
+                    accum_buffer[j * WIDTH + i] = float3 { x: 0.0, y: 0.0, z: 0.0 };
+                }
+            }
+            accum_count = 0;
+        }
+
         for j in 0..HEIGHT {
             for i in 0..WIDTH {
                 let mut color: float3 = float3 { x: 0.0, y: 0.0, z: 0.0 };
@@ -162,12 +205,20 @@ fn main() {
                 let u = ((i as f32) + random::random_f32()) / ((WIDTH-1) as f32);
                 let v = 1.0 - ((j as f32) + random::random_f32()) / ((HEIGHT-1) as f32);
 
+                let corner = camera.origin - (camera.right * camera.viewport_width) * 0.5 - (camera.up * camera.viewport_height) * 0.5 - camera.forward;
+
                 let r = ray {
                     origin: camera.origin,
+                    // direction: float3 {
+                    //     x: corner.x + u * camera.viewport_width - camera.origin.x,
+                    //     y: corner.y + v * camera.viewport_height - camera.origin.y,
+                    //     z: corner.z - camera.origin.z
+                    // }
+
                     direction: float3 {
-                        x: corner.x + u * camera.viewport_width - camera.origin.x,
-                        y: corner.y + v * camera.viewport_height - camera.origin.y,
-                        z: corner.z - camera.origin.z
+                        x: corner.x + u * camera.horizontal.x + v * camera.vertical.x - camera.origin.x,
+                        y: corner.y + u * camera.horizontal.y + v * camera.vertical.y - camera.origin.y,
+                        z: corner.z + u * camera.horizontal.z + v * camera.vertical.z - camera.origin.z
                     }
                 };
 
